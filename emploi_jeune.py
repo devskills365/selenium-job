@@ -8,7 +8,8 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 
 # Étape 1 : Configurer le WebDriver
-driver_path = "C:\\Users\\DELL\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"
+# Configuration du driver
+driver_path = "C:\\Users\\DELL\\OneDrive - ENSEA\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"
 service = Service(driver_path)
 driver = webdriver.Chrome(service=service)
 
@@ -59,12 +60,12 @@ def extract_offers():
             print("Erreur lors de l'extraction d'une offre :", e)
 
 # Étape 4 : Parcourir les pages de 1 à 10
-for page in range(1, 11):  # De 1 à 10
+for page in range(1, 19):  # De 1 à 10
     url = base_url + str(page)
     driver.get(url)
     
     # Attendre que les éléments soient visibles
-    WebDriverWait(driver, 10).until(
+    WebDriverWait(driver, 60).until(
         EC.presence_of_all_elements_located((By.CLASS_NAME, "job-post-info"))
     )
     

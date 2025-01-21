@@ -1,3 +1,4 @@
 import pandas as pd
-data=pd.read_csv("emploi_ci_jobs.csv")
-print(data.head())
+data=pd.read_csv("job_offers.csv")
+print(data.describe())
+

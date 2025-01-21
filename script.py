@@ -6,7 +6,9 @@ from selenium.webdriver.support import expected_conditions as EC
 import csv
 
 # Configuration du driver
-driver_path = "C:\\Users\\DELL\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"
+driver_path = "C:\\Users\\DELL\\OneDrive - ENSEA\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"
+
+
 options = webdriver.ChromeOptions()
 options.add_argument("--incognito")
 options.add_argument("--disable-gpu")
