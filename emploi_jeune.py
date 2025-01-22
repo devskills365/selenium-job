@@ -2,97 +2,131 @@ import csv
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 
-# Étape 1 : Configurer le WebDriver
-# Configuration du driver
+# Chemin vers le driver Selenium
 driver_path = "C:\\Users\\DELL\\OneDrive - ENSEA\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"
-service = Service(driver_path)
-driver = webdriver.Chrome(service=service)
 
-# Étape 2 : Ouvrir l'URL de base
-base_url = "https://www.agenceemploijeunes.ci/site/offres-emplois?page="
-driver.get(base_url + "1")  # Charger la première page
+# Nom du fichier CSV
+csv_file = "offres_emploi.csv"
 
-# Pause initiale pour chargement
-time.sleep(5)
+# Création du fichier CSV avec en-têtes
+def create_csv():
+    with open(csv_file, mode="w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["Titre", "Métier(s)", "Niveau(x)", "Expérience", "Lieu", "Date de publication", "Date limite", "URL"])
 
-# Étape 3 : Initialiser une liste pour stocker les données
-job_offers = []
+# Ajout des données dans le fichier CSV
+def append_to_csv(data):
+    with open(csv_file, mode="a", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(data)
 
-# Fonction pour extraire les informations d'une page
-def extract_offers():
-    offers = driver.find_elements(By.CLASS_NAME, "job-post-info")
-    for offer in offers:
+# Fonction pour extraire les URLs depuis la page principale
+def get_job_urls(home_url):
+    options = webdriver.ChromeOptions()
+    options.add_argument("--incognito")
+    options.add_argument("--headless=new")  # Mode sans interface graphique
+    service = Service(driver_path)
+    driver = webdriver.Chrome(service=service, options=options)
+
+    try:
+        driver.get(home_url)
+        wait = WebDriverWait(driver, 10)
+
+        # Attendre que les offres soient chargées
+        job_elements = wait.until(EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, "div.job-post > a")  # Ajustez le sélecteur selon le site
+        ))
+
+        # Collecter les URLs des offres
+        job_urls = [job.get_attribute("href") for job in job_elements]
+        return job_urls
+
+    except Exception as e:
+        print(f"Erreur lors de la récupération des URLs : {e}")
+        return []
+
+    finally:
+        driver.quit()
+
+# Fonction pour scraper les détails d'une offre
+def scrape_job_details(url):
+    options = webdriver.ChromeOptions()
+    options.add_argument("--incognito")
+    options.add_argument("--headless=new")  # Mode sans interface graphique
+    service = Service(driver_path)
+    driver = webdriver.Chrome(service=service, options=options)
+
+    try:
+        driver.get(url)
+        wait = WebDriverWait(driver, 10)
+
+        # Vérifier si la page contient les détails de l'offre
         try:
-            # Titre et lien du poste
-            title_element = offer.find_element(By.TAG_NAME, "h4").find_element(By.TAG_NAME, "a")
-            title = title_element.text.strip()
-            link = title_element.get_attribute("href")
-
-            # Dates et localisation
-            published_date_element = offer.find_element(By.XPATH, "//*[@id='offre_aej']/ul/li[1]/div/div[1]/div[2]/ul/div/li[1]")
-            published_date = published_date_element.text.split(":")[1].strip()
-
-            deadline_date_element = offer.find_element(By.XPATH, "//*[@id='offre_aej']/ul/li[1]/div/div[1]/div[2]/ul/div/li[2]")
-            deadline_date = deadline_date_element.text.split(":")[1].strip()
-
-            location_element = offer.find_element(By.XPATH, "//*[@id='offre_aej']/ul/li[1]/div/div[1]/div[2]/ul/div/li[3]")
-            location = location_element.text.strip()
-
-            description_element = offer.find_element(By.XPATH, "//*[@id='offre_aej']/ul/li[1]/div/p")
-            description = description_element.text.strip()
-
-            # Ajouter l'offre à la liste
-            job_offers.append({
-                "Titre": title,
-                "Lien": link,
-                "Publié le": published_date,
-                "Date limite": deadline_date,
-                "Localisation": location,
-                "Description": description
-            })
-
+            post_content = wait.until(EC.presence_of_element_located(
+                (By.CSS_SELECTOR, ".text-col.post.small-post.col-md-9.col-xs-12")
+            ))
         except Exception as e:
-            print("Erreur lors de l'extraction d'une offre :", e)
+            print(f"Erreur : La page n'a pas chargé pour l'URL : {url}")
+            return None
 
-# Étape 4 : Parcourir les pages de 1 à 10
-for page in range(1, 19):  # De 1 à 10
-    url = base_url + str(page)
-    driver.get(url)
-    
-    # Attendre que les éléments soient visibles
-    WebDriverWait(driver, 60).until(
-        EC.presence_of_all_elements_located((By.CLASS_NAME, "job-post-info"))
-    )
-    
-    # Extraire les offres visibles sur la page actuelle
-    extract_offers()
+        # Fonction pour extraire du texte en toute sécurité
+        def safe_find(selector, method="css", default=""):
+            try:
+                if method == "css":
+                    return post_content.find_element(By.CSS_SELECTOR, selector).text.strip()
+                elif method == "xpath":
+                    return post_content.find_element(By.XPATH, selector).text.strip()
+            except Exception:
+                return default
 
-    # Attendre que la page soit complètement chargée avant de passer à la suivante
-    time.sleep(3)  # Temps d'attente réduit à 3 secondes
+        # Extraction des données
+        job_title = driver.find_element(By.CSS_SELECTOR, "h1").text.strip()  # Titre de l'offre
+        metiers = safe_find("li:nth-child(1)", "css").replace("Métier(s):", "").strip()
+        niveau = safe_find("li:nth-child(2)", "css").replace("Niveau(x):", "").strip()
+        experience = safe_find("li:nth-child(3)", "css").replace("Expérience:", "").strip()
+        lieu = safe_find("li:nth-child(4)", "css").replace("Lieu:", "").strip()
+        date_publication = safe_find("li:nth-child(5) span", "css")
+        date_limite = safe_find("li:nth-child(6) span", "css")
 
-# Étape 5 : Sauvegarder les données dans un fichier CSV
-csv_file = "job_offers.csv"
+        # Formatage des données pour insertion
+        job_data = (
+            job_title, metiers, niveau, experience, lieu,
+            date_publication, date_limite, url
+        )
 
-# En-têtes des colonnes
-headers = ["Titre", "Lien", "Publié le", "Date limite", "Localisation", "Description"]
+        return job_data
 
-# Ouvrir le fichier CSV en mode écriture
-with open(csv_file, mode='w', newline='', encoding='utf-8') as file:
-    writer = csv.DictWriter(file, fieldnames=headers)
-    
-    # Écrire l'en-tête dans le fichier CSV
-    writer.writeheader()
-    
-    # Écrire les données des offres dans le fichier
-    for job in job_offers:
-        writer.writerow(job)
+    except Exception as e:
+        print(f"Erreur lors de l'extraction pour l'URL {url} : {e}")
+        return None
 
-print(f"Les données ont été sauvegardées dans {csv_file}")
+    finally:
+        driver.quit()
 
-# Étape 6 : Fermer le navigateur
-driver.quit()
+# Fonction principale
+def scrape_jobs_to_csv(home_url):
+    """Scrape toutes les offres d'emploi depuis la page principale."""
+    print("Début de l'extraction des offres...")
+    create_csv()
+
+    # Récupérer les URLs des offres
+    job_urls = get_job_urls(home_url)
+    print(f"{len(job_urls)} offres trouvées.")
+
+    for url in job_urls:
+        print(f"Scraping : {url}")
+        scraped_data = scrape_job_details(url)
+        if scraped_data:
+            append_to_csv(scraped_data)
+        time.sleep(1)  # Délai pour éviter d'être bloqué
+
+    print(f"Extraction terminée. Les données ont été sauvegardées dans {csv_file}.")
+
+# Appel principal
+if __name__ == "__main__":
+    HOME_URL = "https://emploi.educarriere.ci/"  # URL de la page principale
+    scrape_jobs_to_csv(HOME_URL)

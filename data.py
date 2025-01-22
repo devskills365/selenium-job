@@ -1,103 +1,120 @@
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException, StaleElementReferenceException
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
 import csv
 import time
+from selenium.webdriver.chrome.options import Options
 
-# Configuration du driver Selenium
-driver_path = "C:\\Users\\DELL\\OneDrive - ENSEA\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"
+# Configuration
+driver_path = "C:\\Users\\DELL\\OneDrive - ENSEA\\Desktop\\selenium\\chromedriver-win64\\chromedriver.exe"  # À ADAPTER ABSOLUMENT !
+csv_filename = "emploi_educarriere_ci_ok.csv"
+base_url = "https://emploi.educarriere.ci/emploi/page/emploi/"
+start_page = 1
+end_page = 26  # Ajustez selon le nombre de pages à scraper
+max_retries = 3
+retry_delay = 5
+timeout = 60  # Timeout global pour les opérations Selenium
 
-def scrape_job_details(url):
-    """Extrait les détails d'une offre d'emploi à partir de l'URL donnée."""
-    options = webdriver.ChromeOptions()
-    options.add_argument("--incognito")
-    options.add_argument("--headless=new")  # Mode sans interface graphique
+# Options du navigateur (anti-détection renforcée)
+options = Options()
+options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.199 Safari/537.36")
+# options.add_argument("--headless=new")  # Mode sans interface graphique (décommenter pour l'utiliser)
+options.add_argument("--disable-blink-features=AutomationControlled")
+options.add_experimental_option("excludeSwitches", ["enable-automation"])
+options.add_experimental_option('useAutomationExtension', False)
+options.add_argument("--disable-extensions")
+options.add_argument("--disable-popup-blocking")
+options.add_argument("--disable-notifications")
+options.add_argument("--log-level=3")  # Réduire les logs du navigateur
+
+# Initialisation du driver (avec gestion des erreurs critiques)
+try:
     service = Service(driver_path)
     driver = webdriver.Chrome(service=service, options=options)
+except WebDriverException as e:
+    print(f"Erreur CRITIQUE lors de l'initialisation du WebDriver : {e}")
+    exit()
 
+job_listings = []
+
+def extract_from_list(card, text_to_find):
     try:
-        driver.get(url)
-        wait = WebDriverWait(driver, 10)
+        li_element = WebDriverWait(card, timeout).until(EC.presence_of_element_located((By.XPATH, f".//li[contains(., '{text_to_find}')]")))
+        return li_element.text.split(":")[1].strip() if ":" in li_element.text else "Non spécifié"
+    except (NoSuchElementException, TimeoutException, StaleElementReferenceException):
+        return "Non spécifié"
 
-        # Attendre que la page charge complètement
+def scrape_page(url):
+    retries = 0
+    while retries < max_retries:
         try:
-            content_inner = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "content-inner-1")))
+            print(f"Scraping page: {url} (Tentative {retries + 1})")
+            driver.get(url)
+
+            WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.CSS_SELECTOR, ".rt-post h4.post-title a"))) #attente plus précise
+            time.sleep(2) #Attendre le chargement des éléments dynamiques
+
+            cards = driver.find_elements(By.CSS_SELECTOR, ".rt-post")
+            if not cards:
+                print("Aucune offre trouvée sur cette page.")
+                return True
+
+            for card in cards:
+                job_data = {}
+                try:
+                    job_data["Titre"] = card.find_element(By.XPATH, ".//h4/a").text.strip()
+                    job_data["Lien"] = card.find_element(By.XPATH, ".//h4/a").get_attribute("href")
+
+                    job_listings.append(job_data)
+
+                except (NoSuchElementException, TimeoutException, StaleElementReferenceException) as e:
+                    print(f"Erreur lors de l'extraction des données d'une offre : {e}")
+                    print(card.get_attribute('innerHTML') if card else "Carte non disponible pour le debug") #protection si la card n'existe pas
+                except Exception as e:
+                    print(f"Erreur inattendue lors de l'extraction d'une offre: {e}")
+                    print(card.get_attribute('innerHTML')if card else "Carte non disponible pour le debug")
+
+            return True  # Page scrapée avec succès
+
         except TimeoutException:
-            print(f"Erreur : La page n'a pas chargé pour l'URL : {url}")
-            return None
+            print(f"Délai d'attente dépassé pour {url}. Réessai dans {retry_delay} secondes...")
+            retries += 1
+            time.sleep(retry_delay)
+        except WebDriverException as e:
+            print(f"Erreur WebDriver pour {url}: {e}. Réessai dans {retry_delay} secondes...")
+            retries += 1
+            time.sleep(retry_delay)
+        except Exception as e:
+            print(f"Erreur inattendue lors du chargement de {url}: {e}. Réessai dans {retry_delay} secondes...")
+            retries += 1
+            time.sleep(retry_delay)
 
-        job_data = {}
+    print(f"Échec du scraping de {url} après {max_retries} tentatives.")
+    return False
 
-        # Fonction pour extraire des éléments de manière sécurisée
-        def safe_find(selector, method="css", default=""):
-            try:
-                if method == "css":
-                    return content_inner.find_element(By.CSS_SELECTOR, selector).text.strip()
-                elif method == "xpath":
-                    return content_inner.find_element(By.XPATH, selector).text.strip()
-            except NoSuchElementException:
-                return default
+try:
+    for page_num in range(start_page, end_page + 1):
+        url = base_url + str(page_num)
+        if not scrape_page(url):
+            print(f"Arrêt du scraping après plusieurs erreurs consécutives sur la page {page_num}.")
+            break
 
-        # Extraction des données principales
-        job_data["Titre"] = safe_find("h3.title-head a")
-        job_data["Date de clôture"] = safe_find("//li[strong[contains(text(),'Date de clôture:')]]", method="xpath")
-        job_data["Lieu de travail"] = safe_find("//li[strong[contains(text(),'Lieu de travail')]]/span", method="xpath")
-        job_data["Sexe"] = safe_find("//li[strong[contains(text(),'Sexe')]]/span", method="xpath")
-        job_data["Niveau"] = safe_find("//li[strong[contains(text(),\"Niveau d'études\")]]/span", method="xpath")
+finally:
+    driver.quit()
 
-
-        # Extraire toutes les descriptions listées dans .job-info-box
-        try:
-            description_elements = content_inner.find_elements(By.CSS_SELECTOR, ".job-info-box p")
-            descriptions = [p.text.strip() for p in description_elements if p.text.strip()]
-            job_data["Description"] = "\n".join(descriptions)  # Combiner les descriptions avec des sauts de ligne
-        except NoSuchElementException:
-            job_data["Description"] = "Aucune description trouvée"
-
-        return job_data
-
-    except Exception as e:
-        print(f"Erreur inattendue lors de l'extraction pour l'URL {url}: {e}")
-        return None
-
-    finally:
-        driver.quit()
-
-
-# Extraction pour une plage d'URLs
-def extract_jobs(start_range, end_range, output_file="job_details_ok.csv"):
-    print("Début de l'extraction des offres...")
-    job_details = []
-
-    for job_number in range(start_range, end_range + 1):
-        url = f"https://www.agenceemploijeunes.ci/site/offres-emplois/{job_number}"
-        print(f"Scraping : {url}")
-        scraped_data = scrape_job_details(url)
-        if scraped_data:
-            job_details.append(scraped_data)
-        time.sleep(1)  # Délai pour éviter d'être bloqué
-
-    print("Extraction terminée. Sauvegarde des données...")
-
-    # Sauvegarde des données dans un fichier CSV
-    if job_details:
-        with open(output_file, 'w', newline='', encoding='utf-8') as csvfile:
-            fieldnames = ["Titre", "Date de clôture", "Lieu de travail", "Sexe","Niveau","Description"]
+# Sauvegarde CSV (avec gestion du cas où aucune donnée n'a été extraite)
+if job_listings:
+    try:
+        with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = job_listings[0].keys()
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
-            writer.writerows(job_details)
-        print(f"Données sauvegardées dans {output_file}")
-    else:
-        print("Aucune donnée n'a été extraite.")
-
-# Appel principal
-if __name__ == "__main__":
-    # Définir la plage d'URLs à scraper
-    START_RANGE = 40439
-    END_RANGE = 40442
-    OUTPUT_FILE = "job_details_ok.csv"
-
-    extract_jobs(START_RANGE, END_RANGE, OUTPUT_FILE)
+            writer.writerows(job_listings)
+        print(f"Données enregistrées dans {csv_filename}")
+    except Exception as e:
+        print(f"Erreur lors de l'écriture du CSV : {e}")
+else:
+    print("Aucune donnée à enregistrer.")
